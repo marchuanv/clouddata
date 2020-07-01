@@ -2,27 +2,23 @@ const { google } = require("googleapis");
 const utils = require("utils");
 const fs = require("fs");
 const fsPath = require("path");
-const privateKey = require("./privatekey.json");
-const CONTAINER_GOOGLE_PK = process.env.CONTAINER_GOOGLE_PK || privateKey.CONTAINER_GOOGLE_PK;
-const CONTAINER_GOOGLE_PK_ID = process.env.CONTAINER_GOOGLE_PK_ID || privateKey.CONTAINER_GOOGLE_PK_ID;
 const lineBreaks = new RegExp(/\\n/,"g");
-const rootName = "minecraft";
 
 process.google = { files: [], folders: [] };
 
-const initialise = async() => {
+const initialise = async({ privateKey, privateKeyId }) => {
 	lineBreaks.lastIndex = 0;
 	const credentials = {
-		"type": "service_account",
-		"project_id": "api-project-927120566382",
-		"private_key_id": "55a4ca5c54d330c5f2ce4788df210b7f8dcb3171",
-		"private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCZx8xxwEYJDAg4\n1M58sULcU5cQexh3NWfGR9kRKsEa5J+RWqQR8Eu9UI5n7+UddE/utM4oVyn6/xx5\npIjU7/YlqTw0TbdjA4asBSZo08CYT3He8/6FWVrisr5NwsoZjOTaWyVdJr1RyGVq\nHgNg2UsWoHQEix6vMtcHP4zB3NgSLpZeEqszOSqnjnqLErQlYLyz28USgqWFtv0R\nG9cnku5P+xwzv2kR8dBJr5FyHMLaXx3+sIBXegenI5eI8brH7XtiWgp153lmE1OA\n65p2Bofsb8ULPOgH4k8gQ/mefkfbmAUyE1RykP6f5SC80huFiqbjsu59pSm8WDs8\ne0xTFHPLAgMBAAECggEAHaV9ng5l0heuPBqWpkZcL/KzhFte15iFpZ2zVNJrwP4D\nXzfcupKbX2d41MPUZU3HnSrhNbi8IKXu/OqB8J9EUnViZGj5Kk8DNwWVJo9wKUzj\nlIpwbo/P7DVuZ7peUPevJQN+XAt8YxhhqMgZeaHajoWnaDrT0w3Xk4+mWLd1NmfV\nVyaR67twYrnvps3AMX3E32ei4s43KtLnD+WJrhZ3Oij8guTQQ2uCl2oMtti/g5m9\nbTHMbRz81IJ8oFk2NitPsEtE3hnvH1/UXXfW3HMKYCar3P3ZbyzYkgMIY0WnEyir\nnca3H1RpUnXJ89RCY3TJemphnpWGry/4UsN5Z/gtjQKBgQDHr/kKKjoRJxiIq1/d\nnfYqfBCqHCGE/IHgsH6FzePLxNVkZLOvxedk+ilUUwZfHfY5plJImgOqS1gFVGzN\nC7L9xmrrtdMzhJnOyqdfVg5IKhEwjNqkb9aCmjKvJN2eNdKTPAJH6S55CdbLaft1\nDFuOwUUXNGxXx/shw/LILoVfxQKBgQDFJar6Fy7GD0K5mfgNkNQouwUZbw7F17Da\nY2DVjqVfVkolRDRBNa0Sbti2aWi/SvUvdSp3WB+x+QBhlwGCGyUwJTroIwMoPcoL\nd+f4s0Qk08NvC9arreIA7I+JBIXMY/nEIn6RKRlnREbBKmQqaj9QuNtbM81Vw7i+\nhSuz5sSuTwKBgGHC2ETOuZDuOAepBw0DqaHRDYOKtCpcSOWM4tR1ISIAoow89O+I\nDyoTgypiX0sv6vz8XWpn5IV5z4UEeSPFp4KwomX1pYmiUH66HkkBY4qW9cV0IBLD\nIhzcixXOEaXEKeylQ2SbV4Iwe/UoVNBQFX8FReL/ak9re5pjSTgR9oAVAoGABkHL\ny2Qw99hEJd/dH5EZKrHE16nOrjjKRCQjTqPYW85BTC19+xPZCly6RA/UYz3dykPN\ntTv2xY9Bk9dXFOoHpB+KXxO9ZemQIA0OL7aA0yplaYDWr1w1cBIR/CdIl9QUeUUe\n/zxusfhYxoix5Sa6G7XCQILEYZR0qJdRa8RHOcECgYEAn51asTl12KIp9WlyQNu9\nmkogsk0EqG1MQoXrzcljAOrSCsI2QQCRfaCrhI9PoxN2wWOFtzq48+9gQsYSjKBP\nJeUV6kEPXUeuTL2wSXWfrZu3Plt4vwAt4jeoJanslHl20xinFKrzn8Vwipa07nqS\n3xZQjSt0Vob2A9XZHfuKsZY=\n-----END PRIVATE KEY-----\n",
-		"client_email": "ragetoast@api-project-927120566382.iam.gserviceaccount.com",
-		"client_id": "101652556790738375238",
-		"auth_uri": "https://accounts.google.com/o/oauth2/auth",
-		"token_uri": "https://oauth2.googleapis.com/token",
-		"auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-		"client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/ragetoast%40api-project-927120566382.iam.gserviceaccount.com"
+		type: "service_account",
+		project_id: "api-project-927120566382",
+		private_key_id: privateKeyId,
+		private_key: privateKey,
+		client_email: "ragetoast@api-project-927120566382.iam.gserviceaccount.com",
+		client_id: "101652556790738375238",
+		auth_uri: "https://accounts.google.com/o/oauth2/auth",
+		token_uri: "https://oauth2.googleapis.com/token",
+		auth_provider_x509_cert_url: "https://www.googleapis.com/oauth2/v1/certs",
+		client_x509_cert_url: "https://www.googleapis.com/robot/v1/metadata/x509/ragetoast%40api-project-927120566382.iam.gserviceaccount.com"
 	};
 	credentials.private_key = credentials.private_key.replace(lineBreaks,"\n")
 	const auth = new google.auth.JWT(credentials.client_email, null, credentials.private_key, ['https://www.googleapis.com/auth/drive',
@@ -93,7 +89,7 @@ const createRootFile = async ( { drive, name, data } ) => {
 	return { id: item.data.id, name, data, parentId: item.data.parents[0], parentName: "My Drive" };
 };
 
-const deleteFolder = async ( { drive, folderName } ) => {
+const deleteRemoteFolder = async ( { drive, folderName } ) => {
 
 	const res = await drive.files.list({
 		q: `name='${folderName}' and mimeType='application/vnd.google-apps.folder'`
@@ -187,71 +183,71 @@ const getFileMetadata = async ( { drive, pageToken = "" }) => {
 	return fileMetadata;
 }
 
-( async() => {
+module.exports = {
+	upload: async ( { privateKey, privateKeyId, rootDirPath, rootDirName } ) => {
+		
+		if (!rootDirName || !rootDirPath || !privateKey || !privateKeyId){
+			return;
+		}
+		let rootDir = fsPath.parse(`${rootDirPath}/${rootDirName}`);
+		rootDir = fsPath.format(rootDir);
+		if (!fs.existsSync(rootDir)){
+			console.log(`the ${rootDir} does not exist.`);
+			return;
+		}
+		
+		const paths = await utils.getFullPaths(rootDir);
+		const { drive } = await initialise({ privateKey, privateKeyId });
 
-	const { drive } = await initialise();
+		await deleteRemoteFolder({ drive, folderName: rootDirName });
 
-	let rootFolder = process.google.folders.find( x => x.name === rootName && x.parentName === "My Drive" );
-	if (!rootFolder){
-		const tempFile = await createRootFile({ drive, name: "tempFile",data: ""});
-		await deleteAllFiles({drive});
-		await deleteFolder({ drive, folderName: rootName });
-		rootFolder = await createFolder({ drive, name: rootName, parentId: tempFile.parentId, parentName: tempFile.parentName  });
-	}
-
-	if (process.google.folders.length === 0){
-		process.google.folders  = await getFolderMetadata({ drive });
-	}
-
-	if (process.google.files.length === 0){
-		process.google.files =  await getFileMetadata({ drive });
-		for (const file of process.google.files){
-			const folder = process.google.folders.find( x => x.id === file.parentId);
-			file.parentName = folder.name;
-		};
-	}
-
-	let paths = fs.readFileSync("./sync/minecraft.index","utf8");
-	if (paths){
-		paths  = paths.split("\r\n");
-	}
+		let rootFolder = process.google.folders.find( x => x.name === rootDirName && x.parentName === "My Drive" );
+		if (!rootFolder){
+			const tempFile = await createRootFile({ drive, name: "tempFile",data: ""});
+			rootFolder = await createFolder({ drive, name: rootDirName, parentId: tempFile.parentId, parentName: tempFile.parentName  });
+		}
 	
-	for(let path of paths) {
-		let pathSplit = path.replace("c:","").replace("..","").replace("C:","").split("\\").filter(x => x).map(x=>x.toLowerCase());
-		let fileName =  pathSplit[pathSplit.length-1];
-		let folderNames = pathSplit.filter( x => x !== fileName);
-		let parent = rootFolder;
-		for(const _parentName of folderNames){
-			const hasParent = process.google.folders.find( x => x.name === _parentName && x.parentId === parent.id);
-			if (hasParent){
-				parent = hasParent;
-			} else {
-				parent = await createFolder({ drive, name: _parentName, parentId: parent.id, parentName: parent.name  });
-				process.google.folders.push(parent);
+		if (process.google.folders.length === 0){
+			process.google.folders  = await getFolderMetadata({ drive });
+			process.google.folders.push({ name: "My Drive", id: rootFolder.parentId, parentName: null, parentId: null });
+		}
+	
+		if (process.google.files.length === 0){
+			process.google.files =  await getFileMetadata({ drive });
+			for (const file of process.google.files){
+				const folder = process.google.folders.find( x => x.id === file.parentId);
+				file.parentName = folder.name;
+			};
+		}
+
+		for(let path of paths) {
+			let stat = fsPath.parse(path);
+			const pathFolders = stat.dir.replace(rootDirName,"").replace(stat.root,"");
+			let folderNames =  pathFolders.split("/").filter(x=>x);
+			if (folderNames.length === 0 || folderNames.filter( x => x.indexOf(String.fromCharCode(92)) > -1).length > 0 ){
+				folderNames = pathFolders.split(String.fromCharCode(92)).filter(x=>x);
+			}
+			let fileName =  stat.base;
+			let parent = rootFolder;
+			for(const _parentName of folderNames){
+				const hasParent = process.google.folders.find( x => x.name === _parentName && x.parentId === parent.id);
+				if (hasParent){
+					parent = hasParent;
+				} else {
+					parent = await createFolder({ drive, name: _parentName, parentId: parent.id, parentName: parent.name  });
+					process.google.folders.push(parent);
+				}
+			};
+			if (!process.google.files.find( x => x.name === fileName && x.parentId === parent.id)) {
+				const fileData = fs.createReadStream(path);
+				const newFile = await createFileInFolder( { drive, fileName, fileData, parentId: parent.id, parentName: parent.name } );
+				process.google.files.push(newFile);
 			}
 		};
-		if (!process.google.files.find( x => x.name === fileName && x.parentId === parent.id)) {
-			const fileData = fs.createReadStream(`${__dirname}\\minecraft\\${path}`);
-			const newFile = await createFileInFolder( { drive, fileName, fileData, parentId: parent.id, parentName: parent.name } );
-			process.google.files.push(newFile);
+	},
+	download: async ( { privateKey, privateKeyId, rootDirPath, rootDirName } ) => {
+		if (!rootDirName || !rootDirPath || !privateKey || !privateKeyId){
+			return;
 		}
-	};
-	
-	
-})().catch((err)=>{
-	console.error(err);
-});
-
-// module.exports = async function (context, req) {
-//     context.log('JavaScript HTTP trigger function processed a request.');
-
-//     const name = (req.query.name || (req.body && req.body.name));
-//     const responseMessage = name
-//         ? "Hello, " + name + ". This HTTP triggered function executed successfully."
-//         : "This HTTP triggered function executed successfully. Pass a name in the query string or in the request body for a personalized response.";
-
-//     context.res = {
-//         // status: 200, /* Defaults to 200 */
-//         body: responseMessage
-//     };
-// }
+	}
+};

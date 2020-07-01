@@ -1,0 +1,27 @@
+{
+  "name": "clouddata",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "engines": {
+    "node": "12.14.1",
+    "npm": "6.13.4"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/marchuanv/clouddata.git"
+  },
+  "author": "Marchuan",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/marchuanv/clouddata/issues"
+  },
+  "homepage": "https://github.com/marchuanv/clouddata#readme",
+  "dependencies": {
+    "googleapis": "^52.1.0",
+    "utils": "git+https://github.com/marchuanv/utils.git"
+  }
+}

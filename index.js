@@ -6,6 +6,100 @@ const lineBreaks = new RegExp(/\\n/,"g");
 
 process.google = { files: [], folders: [] };
 
+function RetryPolicy() {
+
+	let callbacks = [];
+	const invoke = async (func, args) => {
+		try {
+			const result = await func(args);
+			return {
+				retry: false,
+				result,
+				error: null
+			};
+		} catch(error) {
+			return {
+				retry: true,
+				result: null,
+				error
+			};
+		}
+	};
+
+	this.config = (config, retryMax = 3) => {
+		if (!Array.isArray(config)){
+			throw new Error("invalid config argument");
+		}
+		for(const item of config){
+			this[item.func.name] = (args) => {
+				return new Promise(async (resolve, reject) => {
+					let _continueIdenticalFuncCall = true;
+					let call = callbacks.find(x => x.name === item.func.name);
+					if (call){
+						const args1 = call.args;
+						const args2 = args;
+						_continueIdenticalFuncCall = item.continueIdenticalFuncCall(args1, args2);
+					}
+					if (_continueIdenticalFuncCall === true) {
+						call = {
+							name: item.func.name,
+							func: item.func,
+							args,
+							timeout: 1000,
+							retryCount: 0,
+							retryMax,
+							result: null,
+							error: null
+						};
+						callbacks.push(call);
+						let response = await invoke(call.func, call.args);
+						call.error = response.error;
+						call.result = response.result;
+						if (response.error){
+							await reject(response.error);
+						} else {
+							await resolve(response.result);
+						}
+					} else {
+						const id = setInterval(async() => {
+							if (call.error) {
+								clearInterval(id);
+								await reject(call.error);
+							} else if (call.result) {
+								clearInterval(id);
+								await resolve(call.result);
+							}
+						},1000);
+					}
+				});
+			};
+		};
+	}
+
+	// const id = setInterval(async() => {
+	// 	if (stack.length === 0){
+	// 		return;
+	// 	}
+	// 	const item = stack.pop();
+	// 	let response = await call(item.func, item.args);
+	// 	while(response.retry === true){
+	// 		if (response.error.message.indexOf("User Rate Limit Exceeded.") > -1 ){
+	// 			if (response.retryCount === 3){
+	// 				await item.reject(response.error);
+	// 			} else {
+	// 				response.retryCount = response.retryCount + 1;
+	// 			}
+	// 			response = await call(item.func, item.args);
+	// 		} else {
+	// 			await item.reject(response.error);
+	// 		}
+	// 	}
+	// 	await item.resolve(response.results);
+	// },1000);
+
+
+};
+
 const initialise = async({ privateKey, privateKeyId }) => {
 	lineBreaks.lastIndex = 0;
 	const credentials = {
@@ -21,65 +115,17 @@ const initialise = async({ privateKey, privateKeyId }) => {
 		client_x509_cert_url: "https://www.googleapis.com/robot/v1/metadata/x509/ragetoast%40api-project-927120566382.iam.gserviceaccount.com"
 	};
 	credentials.private_key = credentials.private_key.replace(lineBreaks,"\n")
-	const auth = new google.auth.JWT(credentials.client_email, null, credentials.private_key, ['https://www.googleapis.com/auth/drive',
-					'https://www.googleapis.com/auth/drive.file',
-					'https://www.googleapis.com/auth/drive.metadata'],"",credentials.private_key_id);
+	const auth = new google.auth.JWT(credentials.client_email, null, credentials.private_key, [ 
+		'https://www.googleapis.com/auth/drive',
+		'https://www.googleapis.com/auth/drive.file',
+		'https://www.googleapis.com/auth/drive.metadata'],
+	 "", credentials.private_key_id);
+
 	await auth.authorize();
 	const drive = await google.drive({ version: 'v3', auth });
 	return { drive, auth };
 };
 
-const loadFile = async (id) => {
-	let file = process.google.files.find(x => x.id === id);
-	if (file){
-		return file;
-	} else {
-		file = {
-			id, 
-			data: null,
-			originalData: {},
-			callbacks: [],
-			onFileChange: (callback) => {
-				file.callbacks.push(callback);
-			}
-		};
-		const res = await drive.files.list({
-			auth: auth,
-			q: "'root' in parents",
-			fields: "files(id, name, mimeType)"
-		});
-		const metadata = res.data.files.find(x=>x.name === id);
-		if (metadata) {
-			console.log("Metadata Found: ", metadata);
-			let data = await drive.files.get({ fileId: metadata.id, alt: 'media'});
-			if (data) {
-				const dataStr = JSON.stringify(data);
-				if (!dataStr) {
-					throw new Error(`failed to parse ${id} to json string.`);
-				}
-
-				const dateFormat = /^(-?(?:[1-9][0-9]*)?[0-9]{4})-(1[0-2]|0[1-9])-(3[01]|0[1-9]|[12][0-9])T(2[0-3]|[01][0-9]):([0-5][0-9]):([0-5][0-9])(.[0-9]+)?(Z)?$/;
-				data = JSON.parse(dataStr, (key, value) => {
-					if (typeof value === "string" && dateFormat.test(value)) {
-					return new Date(value);
-					}
-					return value;
-				});
-
-				if (!data) {
-					throw new Error(`failed to parse ${id} to an object with valid dates.`);
-				}
-				file.data = data;
-				console.log(`file for ${id} was loaded from google drive.`);
-			} else {
-				console.log(`new file ${id} was created on google drive.`);
-				file.data = null;
-			}
-		}
-		process.google.files.push(file);
-		return file;
-	}
-};
 
 const createRemoteRootFile = async ( { drive, name, data } ) => {
 	const resource = { name };
@@ -89,29 +135,19 @@ const createRemoteRootFile = async ( { drive, name, data } ) => {
 	return { id: item.data.id, name, data, parentId: item.data.parents[0], parentName: "My Drive" };
 };
 
-const deleteRemoteFolder = async ( { drive, folderName } ) => {
 
+const deleteRemoteFile = async ( { drive, name } ) => {
 	const res = await drive.files.list({
-		q: `name='${folderName}' and mimeType='application/vnd.google-apps.folder'`
+		q: `mimeType != 'application/vnd.google-apps.folder'`,
+		fields: 'files(id, name)'
 	});
-	const parentFolderIds = res.data.files.filter(x=>x.name === folderName).map(x=>x.id);
-	for(const folderId of parentFolderIds){
-		await drive.files.delete({
-			'fileId': folderId
-		});
-	};
-};
-
-const deleteAllFiles = async ( { drive } ) => {
-	const res = await drive.files.list({
-		q: `mimeType != 'application/vnd.google-apps.folder'`
+	const fileId = res.data.files.filter(file => file.name === name).map(file => file.id)[0];
+	if (!fileId){
+		throw new Error(`${name} does not exist.`);
+	}
+	await drive.files.delete({
+		'fileId': fileId
 	});
-	const fileIds = res.data.files.map(x=>x.id)
-	for(const folderId of fileIds){
-		await drive.files.delete({
-			'fileId': folderId
-		});
-	};
 };
 
 const createRemoteFolder = async ({ drive, name, parentId, parentName }) => {
@@ -162,14 +198,34 @@ const getRemoteFolderMetadata = async ( { drive , pageToken = "" }) => {
 	return fileMetadata;
 }
 
+
+const deleteRemoteFolder = async ( { drive, folderName } ) => {
+	const res = await drive.files.list({
+		q: `name='${folderName}' and mimeType='application/vnd.google-apps.folder'`
+	});
+	const parentFolderIds = res.data.files.filter(x=>x.name === folderName).map(x=>x.id);
+	for(const folderId of parentFolderIds){
+		await drive.files.delete({
+			'fileId': folderId
+		});
+	};
+	
+	const folders = await getRemoteFolderMetadata( {drive } );
+
+	if (folders.find( x => x.name === folderName)){
+		throw new Error(`failed to delete the ${folderName} folder`);
+	}
+
+};
+
 const getRemoteFileMetadata = async ( { drive, pageToken = "" }) => {
 	let query = "mimeType != 'application/vnd.google-apps.folder'";
 	let res = await drive.files.list({ 
-		q: query, 
-		pageSize : 20, 
-		pageToken, 
-		orderBy: 'modifiedTime asc', 
-		fields: "nextPageToken,files(id, name, parents, trashed, mimeType)" 
+		q: query,
+		pageSize : 20,
+		pageToken,
+		orderBy: 'modifiedTime asc',
+		fields: "nextPageToken,files(id, name, parents, trashed, mimeType)"
 	});
 	let fileMetadata = res.data.files.filter( x => x.trashed === false).map(x =>  { return {
 		name: x.name,
@@ -182,6 +238,53 @@ const getRemoteFileMetadata = async ( { drive, pageToken = "" }) => {
 	}
 	return fileMetadata;
 }
+
+
+const createRemoteFolders = async ( { drive, pathInfo, rootFolder, rootDirName }) => {
+	const pathFolders = pathInfo.dir.replace(rootDirName,"").replace(pathInfo.root,"");
+	let folderNames =  pathFolders.split("/").filter(x=>x);
+	if (folderNames.length === 0 || folderNames.filter( x => x.indexOf(String.fromCharCode(92)) > -1).length > 0 ){
+		folderNames = pathFolders.split(String.fromCharCode(92)).filter(x=>x);
+	}
+	let parent = rootFolder;
+	for(const _parentName of folderNames){
+		const hasParent = process.google.folders.find( x => x.name === _parentName && x.parentId === parent.id);
+		if (hasParent){
+			parent = hasParent;
+		} else {
+			parent = await createRemoteFolder({ drive, name: _parentName, parentId: parent.id, parentName: parent.name  });
+			process.google.folders.push(parent);
+		}
+	};
+	return parent;
+};
+
+const createRemoteFoldersAndFile = async ( { drive, path, rootFolder, rootDirName }) => {
+	let pathInfo = fsPath.parse(path);
+	const parent = await retryPolicy.createRemoteFolders({ drive, pathInfo, rootFolder, rootDirName });
+	let fileName =  pathInfo.base;
+	if (!process.google.files.find( x => x.name === fileName && x.parentId === parent.id)) {
+		const fileData = fs.createReadStream(path);
+		const newFile = await createFileInFolder( { drive, fileName, fileData, parentId: parent.id, parentName: parent.name } );
+		process.google.files.push(newFile);
+	}
+};
+
+const retryPolicy = new RetryPolicy();
+retryPolicy.config([ { 
+	continueIdenticalFuncCall: ( args1, args2 ) => {
+		return true;
+	},
+	func: createRemoteFoldersAndFile
+},{
+	continueIdenticalFuncCall: ( args1, args2 ) => {
+		if (args1.pathInfo.dir === args2.pathInfo.dir){
+			return false;
+		}
+		return true;
+	},
+	func: createRemoteFolders
+}]);
 
 module.exports = {
 	upload: async ( { privateKey, privateKeyId, rootDirPath, rootDirName } ) => {
@@ -204,7 +307,8 @@ module.exports = {
 
 		let rootFolder = process.google.folders.find( x => x.name === rootDirName && x.parentName === "My Drive" );
 		if (!rootFolder){
-			const tempFile = await createRemoteRootFile({ drive, name: "tempFile",data: ""});
+			await deleteRemoteFile({ drive, name: "tempFile" });
+			const tempFile = await createRemoteRootFile({ drive, name: "tempFile", data: "" });
 			rootFolder = await createRemoteFolder({ drive, name: rootDirName, parentId: tempFile.parentId, parentName: tempFile.parentName  });
 		}
 	
@@ -214,39 +318,22 @@ module.exports = {
 		}
 	
 		if (process.google.files.length === 0){
-			process.google.files =  await getRemoteFileMetadata({ drive });
+			process.google.files = await getRemoteFileMetadata({ drive });
 			for (const file of process.google.files){
 				const folder = process.google.folders.find( x => x.id === file.parentId);
 				file.parentName = folder.name;
 			};
 		}
 
+		const promises = [];
+		
 		for(let path of paths) {
-			let stat = fsPath.parse(path);
-			const pathFolders = stat.dir.replace(rootDirName,"").replace(stat.root,"");
-			let folderNames =  pathFolders.split("/").filter(x=>x);
-			if (folderNames.length === 0 || folderNames.filter( x => x.indexOf(String.fromCharCode(92)) > -1).length > 0 ){
-				folderNames = pathFolders.split(String.fromCharCode(92)).filter(x=>x);
-			}
-			let fileName =  stat.base;
-			let parent = rootFolder;
-			for(const _parentName of folderNames){
-				const hasParent = process.google.folders.find( x => x.name === _parentName && x.parentId === parent.id);
-				if (hasParent){
-					parent = hasParent;
-				} else {
-					parent = await createRemoteFolder({ drive, name: _parentName, parentId: parent.id, parentName: parent.name  });
-					process.google.folders.push(parent);
-				}
-			};
-			if (!process.google.files.find( x => x.name === fileName && x.parentId === parent.id)) {
-				const fileData = fs.createReadStream(path);
-				const newFile = await createFileInFolder( { drive, fileName, fileData, parentId: parent.id, parentName: parent.name } );
-				process.google.files.push(newFile);
-			}
+		
+			const promise = retryPolicy.createRemoteFoldersAndFile({ drive, path, rootFolder, rootDirName });
+			promises.push(promise);
 		};
 
-		
+		await Promise.all(promises);
 	},
 	download: async ( { privateKey, privateKeyId, rootDirPath, rootDirName } ) => {
 		if (!rootDirName || !rootDirPath || !privateKey || !privateKeyId){

@@ -81,7 +81,7 @@ const loadFile = async (id) => {
 	}
 };
 
-const createRootFile = async ( { drive, name, data } ) => {
+const createRemoteRootFile = async ( { drive, name, data } ) => {
 	const resource = { name };
 	console.log(`-> 	creating ${name} file in the root folder.`);
 	let media = { body: data };
@@ -114,7 +114,7 @@ const deleteAllFiles = async ( { drive } ) => {
 	};
 };
 
-const createFolder = async ({ drive, name, parentId, parentName }) => {
+const createRemoteFolder = async ({ drive, name, parentId, parentName }) => {
 	const resource = { name, mimeType: "application/vnd.google-apps.folder", parents: [ parentId ] };
 	console.log(`-> creating ${name} folder in ${parentName}.`);
 	const res = await drive.files.create({ resource });
@@ -137,7 +137,7 @@ const hasChanged = (file) => {
 	return utils.sizeOf(snapshot) !== utils.sizeOf(file.originalData);
 }
 
-const getFolderMetadata = async ( { drive , pageToken = "" }) => {
+const getRemoteFolderMetadata = async ( { drive , pageToken = "" }) => {
 	let query = "mimeType = 'application/vnd.google-apps.folder'";
 	let res = await drive.files.list({ 
 		q: query, 
@@ -152,7 +152,7 @@ const getFolderMetadata = async ( { drive , pageToken = "" }) => {
 		parentId: x.parents[0]
 	}});
 	if (res.data.nextPageToken){
-		fileMetadata =  fileMetadata.concat(await getFolderMetadata({ drive, pageToken: res.data.nextPageToken }));
+		fileMetadata =  fileMetadata.concat(await getRemoteFolderMetadata({ drive, pageToken: res.data.nextPageToken }));
 	}
 	for(const item of fileMetadata){
 		let res = await drive.files.get({ fileId: item.parentId });
@@ -162,7 +162,7 @@ const getFolderMetadata = async ( { drive , pageToken = "" }) => {
 	return fileMetadata;
 }
 
-const getFileMetadata = async ( { drive, pageToken = "" }) => {
+const getRemoteFileMetadata = async ( { drive, pageToken = "" }) => {
 	let query = "mimeType != 'application/vnd.google-apps.folder'";
 	let res = await drive.files.list({ 
 		q: query, 
@@ -178,7 +178,7 @@ const getFileMetadata = async ( { drive, pageToken = "" }) => {
 		parentName: null
 	}});
 	if (res.data.nextPageToken){
-		fileMetadata =  fileMetadata.concat(await getFileMetadata({ drive, pageToken: res.data.nextPageToken }));
+		fileMetadata =  fileMetadata.concat(await getRemoteFileMetadata({ drive, pageToken: res.data.nextPageToken }));
 	}
 	return fileMetadata;
 }
@@ -189,6 +189,7 @@ module.exports = {
 		if (!rootDirName || !rootDirPath || !privateKey || !privateKeyId){
 			return;
 		}
+
 		let rootDir = fsPath.parse(`${rootDirPath}/${rootDirName}`);
 		rootDir = fsPath.format(rootDir);
 		if (!fs.existsSync(rootDir)){
@@ -203,17 +204,17 @@ module.exports = {
 
 		let rootFolder = process.google.folders.find( x => x.name === rootDirName && x.parentName === "My Drive" );
 		if (!rootFolder){
-			const tempFile = await createRootFile({ drive, name: "tempFile",data: ""});
-			rootFolder = await createFolder({ drive, name: rootDirName, parentId: tempFile.parentId, parentName: tempFile.parentName  });
+			const tempFile = await createRemoteRootFile({ drive, name: "tempFile",data: ""});
+			rootFolder = await createRemoteFolder({ drive, name: rootDirName, parentId: tempFile.parentId, parentName: tempFile.parentName  });
 		}
 	
 		if (process.google.folders.length === 0){
-			process.google.folders  = await getFolderMetadata({ drive });
+			process.google.folders  = await getRemoteFolderMetadata({ drive });
 			process.google.folders.push({ name: "My Drive", id: rootFolder.parentId, parentName: null, parentId: null });
 		}
 	
 		if (process.google.files.length === 0){
-			process.google.files =  await getFileMetadata({ drive });
+			process.google.files =  await getRemoteFileMetadata({ drive });
 			for (const file of process.google.files){
 				const folder = process.google.folders.find( x => x.id === file.parentId);
 				file.parentName = folder.name;
@@ -234,7 +235,7 @@ module.exports = {
 				if (hasParent){
 					parent = hasParent;
 				} else {
-					parent = await createFolder({ drive, name: _parentName, parentId: parent.id, parentName: parent.name  });
+					parent = await createRemoteFolder({ drive, name: _parentName, parentId: parent.id, parentName: parent.name  });
 					process.google.folders.push(parent);
 				}
 			};
@@ -244,6 +245,8 @@ module.exports = {
 				process.google.files.push(newFile);
 			}
 		};
+
+		
 	},
 	download: async ( { privateKey, privateKeyId, rootDirPath, rootDirName } ) => {
 		if (!rootDirName || !rootDirPath || !privateKey || !privateKeyId){

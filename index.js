@@ -29,22 +29,21 @@ function RetryPolicy() {
 	const callback = async (config, args, resolve, reject) => {
 		let id = config.getFunctionId(args);
 		let call = callbacks.find(x => x.name === config.func.name && x.id === id);
-		if (!call || (call && config.allowIdenticalCalls === true)) {
+		if (!call || (call && config.allowIdenticalCalls === true) ) {
 			call = {
 				id,
 				name: config.func.name,
 				func: config.func,
 				args,
-				timeout: 1000,
 				retryCount: 0,
 				maxRetry: config.maxRetry,
 				result: null,
 				error: null
 			};
-			callbacks.push(call);
 			let response = await invoke(call.func, call.args);
 			call.error = response.error;
 			call.result = response.result;
+			callbacks.push(call);
 		}
 
 		if (call.error) {
@@ -52,8 +51,9 @@ function RetryPolicy() {
 				call.retryCount = call.retryCount + 1;
 				const timeout = call.retryCount * 1000;
 				call.error = null;
-				setTimeout(async() => {
-					await callback(config, args, resolve, reject);
+				console.log(`${config.func.name}(${call.id}) resulted in error, retrying ${call.retryCount} of ${config.maxRetry}`);
+				setTimeout(() => {
+					callback(config, args, resolve, reject);
 				}, timeout);
 			} else {
 				await reject(call.error);
@@ -62,11 +62,10 @@ function RetryPolicy() {
 			call.retryCount = 0;
 			await resolve(call.result);
 		} else {
-			setTimeout(async() => {
-				await callback(config, args, resolve, reject);
-			},100);
+			setTimeout(() => {
+				callback(config, args, resolve, reject);
+			});
 		}
-
 	};
 
 	this.config = (config, maxRetry = 3) => {
@@ -130,6 +129,8 @@ const deleteRemoteFile = async ( { drive, name } ) => {
 	await drive.files.delete({
 		'fileId': fileId
 	});
+	console.log(`deleted the ${name}(${fileId}) file`);
+	return true;
 };
 
 const createRemoteFolder = async ({ drive, name, parentId, parentName }) => {
@@ -144,7 +145,7 @@ const createFileInFolder = async ({ drive, fileName, fileData, parentId, parentN
 	const body = fileData;
 	const media = { body };
 	const res = await drive.files.create({ resource, media, fields: 'id' });
-	console.log(`->		${fileName} remote file creating in the remote ${parentName} folder.`);
+	console.log(`->		${fileName} remote file created in the ${parentName} folder.`);
 	return { name: fileName, id: res.data.id, parentName, parentId };
 };
 
@@ -176,7 +177,6 @@ const getRemoteFolderMetadata = async ( { drive , pageToken = "" }) => {
 		let res = await drive.files.get({ fileId: item.parentId });
 		item.parentName = res.data.name;
 	};
-	
 	return fileMetadata;
 }
 
@@ -187,17 +187,14 @@ const deleteRemoteFolder = async ( { drive, folderName } ) => {
 	});
 	const parentFolderIds = res.data.files.filter(x=>x.name === folderName).map(x=>x.id);
 	for(const folderId of parentFolderIds){
-		await drive.files.delete({
-			'fileId': folderId
-		});
+		await drive.files.delete({ 'fileId': folderId });
+		console.log(`deleted the ${folderName}(${folderId}) folder`);
 	};
-	
-	const folders = await getRemoteFolderMetadata( {drive } );
-
-	if (folders.find( x => x.name === folderName)){
+	const folders = await getRemoteFolderMetadata({ drive });
+	if (folders.find(x => x.name === folderName)) {
 		throw new Error(`failed to delete the ${folderName} folder`);
 	}
-
+	return true;
 };
 
 const getRemoteFileMetadata = async ( { drive, pageToken = "" }) => {
@@ -253,6 +250,7 @@ const createRemoteFoldersAndFile = async ( { drive, path, rootFolder, rootDirNam
 		const newFile = await retryPolicy.createFileInFolder( { drive, fileName, fileData, parentId: parent.id, parentName: parent.name } );
 		process.google.files.push(newFile);
 	}
+	return true;
 };
 
 const retryPolicy = new RetryPolicy();
@@ -266,6 +264,30 @@ retryPolicy.config([ {
 	allowIdenticalCalls: false,
 	getFunctionId: ({  name, parentId, parentName }) => {
 		return `${name}${parentId}${parentName}`;
+	},
+	func: createRemoteFolder
+},{
+	allowIdenticalCalls: false,
+	getFunctionId: ({  folderName }) => {
+		return `${folderName}`;
+	},
+	func: deleteRemoteFolder
+},{
+	allowIdenticalCalls: false,
+	getFunctionId: ({  name }) => {
+		return `${name}`;
+	},
+	func: deleteRemoteFile
+},{
+	allowIdenticalCalls: false,
+	getFunctionId: ({  name }) => {
+		return `${name}`;
+	},
+	func: createRemoteRootFile
+},{
+	allowIdenticalCalls: false,
+	getFunctionId: ({  name }) => {
+		return `${name}`;
 	},
 	func: createRemoteFolder
 }]);
@@ -287,13 +309,13 @@ module.exports = {
 		const paths = await utils.getFullPaths(rootDir);
 		const { drive } = await initialise({ privateKey, privateKeyId });
 
-		await deleteRemoteFolder({ drive, folderName: rootDirName });
+		await retryPolicy.deleteRemoteFolder({ drive, folderName: rootDirName });
 
 		let rootFolder = process.google.folders.find( x => x.name === rootDirName && x.parentName === "My Drive" );
 		if (!rootFolder){
-			await deleteRemoteFile({ drive, name: "tempFile" });
-			const tempFile = await createRemoteRootFile({ drive, name: "tempFile", data: "" });
-			rootFolder = await createRemoteFolder({ drive, name: rootDirName, parentId: tempFile.parentId, parentName: tempFile.parentName  });
+			await retryPolicy.deleteRemoteFile({ drive, name: "tempFile" });
+			const tempFile = await retryPolicy.createRemoteRootFile({ drive, name: "tempFile", data: "" });
+			rootFolder = await retryPolicy.createRemoteFolder({ drive, name: rootDirName, parentId: tempFile.parentId, parentName: tempFile.parentName  });
 		}
 	
 		if (process.google.folders.length === 0){
@@ -310,9 +332,7 @@ module.exports = {
 		}
 
 		const promises = [];
-		
 		for(let path of paths) {
-		
 			const promise = createRemoteFoldersAndFile({ drive, path, rootFolder, rootDirName });
 			promises.push(promise);
 		};

@@ -26,79 +26,61 @@ function RetryPolicy() {
 		}
 	};
 
-	this.config = (config, retryMax = 3) => {
+	const callback = async (config, args, resolve, reject) => {
+		let id = config.getFunctionId(args);
+		let call = callbacks.find(x => x.name === config.func.name && x.id === id);
+		if (!call || (call && config.allowIdenticalCalls === true)) {
+			call = {
+				id,
+				name: config.func.name,
+				func: config.func,
+				args,
+				timeout: 1000,
+				retryCount: 0,
+				maxRetry: config.maxRetry,
+				result: null,
+				error: null
+			};
+			callbacks.push(call);
+			let response = await invoke(call.func, call.args);
+			call.error = response.error;
+			call.result = response.result;
+		}
+
+		if (call.error) {
+			if (call.retryCount < config.maxRetry){
+				call.retryCount = call.retryCount + 1;
+				const timeout = call.retryCount * 1000;
+				call.error = null;
+				setTimeout(async() => {
+					await callback(config, args, resolve, reject);
+				}, timeout);
+			} else {
+				await reject(call.error);
+			}
+		} else if (call.result) {
+			call.retryCount = 0;
+			await resolve(call.result);
+		} else {
+			setTimeout(async() => {
+				await callback(config, args, resolve, reject);
+			},100);
+		}
+
+	};
+
+	this.config = (config, maxRetry = 3) => {
 		if (!Array.isArray(config)){
 			throw new Error("invalid config argument");
 		}
-		for(const item of config){
-			this[item.func.name] = (args) => {
-				return new Promise(async (resolve, reject) => {
-					let _continueIdenticalFuncCall = true;
-					let call = callbacks.find(x => x.name === item.func.name);
-					if (call){
-						const args1 = call.args;
-						const args2 = args;
-						_continueIdenticalFuncCall = item.continueIdenticalFuncCall(args1, args2);
-					}
-					if (_continueIdenticalFuncCall === true) {
-						call = {
-							name: item.func.name,
-							func: item.func,
-							args,
-							timeout: 1000,
-							retryCount: 0,
-							retryMax,
-							result: null,
-							error: null
-						};
-						callbacks.push(call);
-						let response = await invoke(call.func, call.args);
-						call.error = response.error;
-						call.result = response.result;
-						if (response.error){
-							await reject(response.error);
-						} else {
-							await resolve(response.result);
-						}
-					} else {
-						const id = setInterval(async() => {
-							if (call.error) {
-								clearInterval(id);
-								await reject(call.error);
-							} else if (call.result) {
-								clearInterval(id);
-								await resolve(call.result);
-							}
-						},1000);
-					}
-				});
-			};
+		for(const conf of config){
+			conf.maxRetry = 3;
+			this[conf.func.name] = (args) => new Promise(async (resolve, reject) => {  
+				callback(conf, args, resolve, reject);
+			});
 		};
 	}
-
-	// const id = setInterval(async() => {
-	// 	if (stack.length === 0){
-	// 		return;
-	// 	}
-	// 	const item = stack.pop();
-	// 	let response = await call(item.func, item.args);
-	// 	while(response.retry === true){
-	// 		if (response.error.message.indexOf("User Rate Limit Exceeded.") > -1 ){
-	// 			if (response.retryCount === 3){
-	// 				await item.reject(response.error);
-	// 			} else {
-	// 				response.retryCount = response.retryCount + 1;
-	// 			}
-	// 			response = await call(item.func, item.args);
-	// 		} else {
-	// 			await item.reject(response.error);
-	// 		}
-	// 	}
-	// 	await item.resolve(response.results);
-	// },1000);
-
-
-};
+}
 
 const initialise = async({ privateKey, privateKeyId }) => {
 	lineBreaks.lastIndex = 0;
@@ -129,9 +111,9 @@ const initialise = async({ privateKey, privateKeyId }) => {
 
 const createRemoteRootFile = async ( { drive, name, data } ) => {
 	const resource = { name };
-	console.log(`-> 	creating ${name} file in the root folder.`);
 	let media = { body: data };
 	const item = await drive.files.create({ resource, media, fields: 'id, parents' });
+	console.log(`-> 	${name} file creating in the root folder.`);
 	return { id: item.data.id, name, data, parentId: item.data.parents[0], parentName: "My Drive" };
 };
 
@@ -152,17 +134,17 @@ const deleteRemoteFile = async ( { drive, name } ) => {
 
 const createRemoteFolder = async ({ drive, name, parentId, parentName }) => {
 	const resource = { name, mimeType: "application/vnd.google-apps.folder", parents: [ parentId ] };
-	console.log(`-> creating ${name} folder in ${parentName}.`);
 	const res = await drive.files.create({ resource });
+	console.log(`-> ${name} remote folder created in the ${parentName} parent folder.`);
 	return { name, id: res.data.id, parentName, parentId };
 };
 
 const createFileInFolder = async ({ drive, fileName, fileData, parentId, parentName }) => {
 	const resource = { name: fileName, parents: [parentId] };
-	console.log(`->		creating ${fileName} file in the ${parentName} folder.`);
 	const body = fileData;
 	const media = { body };
 	const res = await drive.files.create({ resource, media, fields: 'id' });
+	console.log(`->		${fileName} remote file creating in the remote ${parentName} folder.`);
 	return { name: fileName, id: res.data.id, parentName, parentId };
 };
 
@@ -239,7 +221,6 @@ const getRemoteFileMetadata = async ( { drive, pageToken = "" }) => {
 	return fileMetadata;
 }
 
-
 const createRemoteFolders = async ( { drive, pathInfo, rootFolder, rootDirName }) => {
 	const pathFolders = pathInfo.dir.replace(rootDirName,"").replace(pathInfo.root,"");
 	let folderNames =  pathFolders.split("/").filter(x=>x);
@@ -248,12 +229,16 @@ const createRemoteFolders = async ( { drive, pathInfo, rootFolder, rootDirName }
 	}
 	let parent = rootFolder;
 	for(const _parentName of folderNames){
-		const hasParent = process.google.folders.find( x => x.name === _parentName && x.parentId === parent.id);
+		let hasParent = process.google.folders.find( x => x.name === _parentName && x.parentId === parent.id);
 		if (hasParent){
 			parent = hasParent;
 		} else {
-			parent = await createRemoteFolder({ drive, name: _parentName, parentId: parent.id, parentName: parent.name  });
-			process.google.folders.push(parent);
+			const parentId = parent.id;
+			parent = await retryPolicy.createRemoteFolder({ drive, name: _parentName, parentId: parent.id, parentName: parent.name  });
+			hasParent = process.google.folders.find( x => x.name === _parentName && x.parentId === parentId);
+			if (!hasParent){
+				process.google.folders.push(parent);
+			}
 		}
 	};
 	return parent;
@@ -261,29 +246,28 @@ const createRemoteFolders = async ( { drive, pathInfo, rootFolder, rootDirName }
 
 const createRemoteFoldersAndFile = async ( { drive, path, rootFolder, rootDirName }) => {
 	let pathInfo = fsPath.parse(path);
-	const parent = await retryPolicy.createRemoteFolders({ drive, pathInfo, rootFolder, rootDirName });
+	const parent = await createRemoteFolders({ drive, pathInfo, rootFolder, rootDirName });
 	let fileName =  pathInfo.base;
 	if (!process.google.files.find( x => x.name === fileName && x.parentId === parent.id)) {
 		const fileData = fs.createReadStream(path);
-		const newFile = await createFileInFolder( { drive, fileName, fileData, parentId: parent.id, parentName: parent.name } );
+		const newFile = await retryPolicy.createFileInFolder( { drive, fileName, fileData, parentId: parent.id, parentName: parent.name } );
 		process.google.files.push(newFile);
 	}
 };
 
 const retryPolicy = new RetryPolicy();
 retryPolicy.config([ { 
-	continueIdenticalFuncCall: ( args1, args2 ) => {
-		return true;
+	allowIdenticalCalls: false,
+	getFunctionId: ({  fileName, parentId, parentName }) => {
+		return `${fileName}${parentId}${parentName}`;
 	},
-	func: createRemoteFoldersAndFile
+	func: createFileInFolder
 },{
-	continueIdenticalFuncCall: ( args1, args2 ) => {
-		if (args1.pathInfo.dir === args2.pathInfo.dir){
-			return false;
-		}
-		return true;
+	allowIdenticalCalls: false,
+	getFunctionId: ({  name, parentId, parentName }) => {
+		return `${name}${parentId}${parentName}`;
 	},
-	func: createRemoteFolders
+	func: createRemoteFolder
 }]);
 
 module.exports = {
@@ -329,7 +313,7 @@ module.exports = {
 		
 		for(let path of paths) {
 		
-			const promise = retryPolicy.createRemoteFoldersAndFile({ drive, path, rootFolder, rootDirName });
+			const promise = createRemoteFoldersAndFile({ drive, path, rootFolder, rootDirName });
 			promises.push(promise);
 		};
 
